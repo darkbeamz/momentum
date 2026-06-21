@@ -5,6 +5,7 @@ import { useWorkspace } from '../hooks/useWorkspace.jsx'
 import { useAuth } from '../hooks/useAuth.jsx'
 import { useData } from '../hooks/useData.jsx'
 import * as db from '../lib/db.js'
+import { getSupabase } from '../lib/supabase.js'
 
 export default function Team() {
   const { workspaces, active, activeId, setActiveId, refresh } = useWorkspace()
@@ -34,13 +35,28 @@ export default function Team() {
   }
 
   const invite = async () => {
-    setErr(''); setMsg('')
+    setErr(‘’); setMsg(‘’)
     const e = email.trim().toLowerCase()
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { setErr('Enter a valid email.'); return }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { setErr(‘Enter a valid email.’); return }
     try {
-      await db.inviteMember(activeId, e, 'member', user.id)
-      setEmail(''); setMsg(`Invited ${e}. They’ll join automatically when they sign up with that email.`)
+      await db.inviteMember(activeId, e, ‘member’, user.id)
+      setEmail(‘’)
       loadInvites()
+      // Send invite email via Edge Function (non-blocking — invite is saved regardless)
+      try {
+        await getSupabase().functions.invoke(‘send-invite’, {
+          body: {
+            email: e,
+            workspaceName: active.name,
+            inviterName: user.user_metadata?.full_name || user.email,
+            appUrl: window.location.origin,
+          },
+        })
+        setMsg(`Invite sent! ${e} will receive an email with a link to join.`)
+      } catch {
+        // Email failed but invite is saved — fall back to manual share message
+        setMsg(`Invited ${e}. Share the app link with them — they’ll auto-join on signup.`)
+      }
     } catch (ex) { setErr(ex.message) }
   }
 
@@ -98,7 +114,7 @@ export default function Team() {
               <button className="btn sm" onClick={invite}>Invite</button>
             </div>
             <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-              Share the app link with them. When they sign up with this email, they’ll land straight in this team and see shared projects in real time.
+              They’ll receive an email invite. When they sign up with that address, they’ll land straight in this team and see shared projects in real time.
             </p>
           </div>
         </>
